@@ -1,5 +1,6 @@
 [package]
 name = "ads1115"
+description = "Generic Rust driver for the ADS1115 Analog/Digital Converter built on top of embedded-hal."
 version = "0.1.0"
 authors = ["Mitch Labrenz <mitchslabrenz@gmail.com>"]
 edition = "2018"
