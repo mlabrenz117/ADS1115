@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::convert::TryFrom;
 
 #[repr(u8)]
@@ -176,6 +178,15 @@ impl From<bool> for Bit {
     }
 }
 
+impl Bit {
+    fn to_u16(&self) -> u16 {
+        match self {
+            Bit::Set => 1,
+            Bit::Clear => 0,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Channel {
     Diff0_1,
@@ -191,14 +202,14 @@ pub enum Channel {
 impl Channel {
     fn to_u16(&self) -> u16 {
         match self {
-            Channel::Diff0_1 => 0x0000,
-            Channel::Diff0_3 => 0x1000,
-            Channel::Diff1_3 => 0x2000,
-            Channel::Diff2_3 => 0x3000,
-            Channel::Single1 => 0x4000,
-            Channel::Single2 => 0x5000,
-            Channel::Single3 => 0x6000,
-            Channel::Single4 => 0x7000,
+            Channel::Diff0_1 => 0b000,
+            Channel::Diff0_3 => 0b001,
+            Channel::Diff1_3 => 0b010,
+            Channel::Diff2_3 => 0b011,
+            Channel::Single1 => 0b100,
+            Channel::Single2 => 0b101,
+            Channel::Single3 => 0b110,
+            Channel::Single4 => 0b111,
         }
     }
 }
@@ -234,12 +245,12 @@ pub enum Gain {
 impl Gain {
     fn to_u16(&self) -> u16 {
         match self {
-            Gain::TwoThirds => 0x0000,
-            Gain::One => 0x0200,
-            Gain::Two => 0x0400,
-            Gain::Four => 0x0600,
-            Gain::Eight => 0x0800,
-            Gain::Sixteen => 0x0A00,
+            Gain::TwoThirds => 0b000,
+            Gain::One => 0b001,
+            Gain::Two => 0b010,
+            Gain::Four => 0b011,
+            Gain::Eight => 0b100,
+            Gain::Sixteen => 0b101,
         }
     }
 }
@@ -269,8 +280,8 @@ pub enum ConversionMode {
 impl ConversionMode {
     fn to_u16(&self) -> u16 {
         match self {
-            ConversionMode::SingleShot => 0x0100,
-            ConversionMode::Continuous => 0x0000,
+            ConversionMode::SingleShot => 0b1,
+            ConversionMode::Continuous => 0b0,
         }
     }
 }
@@ -303,14 +314,14 @@ pub enum DataRate {
 impl DataRate {
     fn to_u16(&self) -> u16 {
         match self {
-            DataRate::SPS_8 => 0x0000,
-            DataRate::SPS_16 => 0x0020,
-            DataRate::SPS_32 => 0x0040,
-            DataRate::SPS_64 => 0x0060,
-            DataRate::SPS_128 => 0x0080,
-            DataRate::SPS_250 => 0x00A0,
-            DataRate::SPS_475 => 0x00C0,
-            DataRate::SPS_860 => 0x00E0,
+            DataRate::SPS_8 => 0b000,
+            DataRate::SPS_16 => 0b001,
+            DataRate::SPS_32 => 0b010,
+            DataRate::SPS_64 => 0b011,
+            DataRate::SPS_128 => 0b100,
+            DataRate::SPS_250 => 0b101,
+            DataRate::SPS_475 => 0b110,
+            DataRate::SPS_860 => 0b111,
         }
     }
 }
@@ -342,8 +353,8 @@ pub enum ComparatorMode {
 impl ComparatorMode {
     fn to_u16(&self) -> u16 {
         match self {
-            ComparatorMode::Traditional => 0x0000,
-            ComparatorMode::Window => 0x0010,
+            ComparatorMode::Traditional => 0b0,
+            ComparatorMode::Window => 0b1,
         }
     }
 }
@@ -369,8 +380,8 @@ pub enum CompPol {
 impl CompPol {
     fn to_u16(&self) -> u16 {
         match self {
-            CompPol::ActiveLow => 0x0000,
-            CompPol::ActiveHigh => 0x0008,
+            CompPol::ActiveLow => 0b0,
+            CompPol::ActiveHigh => 0b1,
         }
     }
 }
@@ -396,8 +407,8 @@ pub enum CompLat {
 impl CompLat {
     fn to_u16(&self) -> u16 {
         match self {
-            CompLat::NonLatching => 0x0000,
-            CompLat::Latching => 0x0004,
+            CompLat::NonLatching => 0b0,
+            CompLat::Latching => 0b1,
         }
     }
 }
@@ -432,10 +443,10 @@ pub enum CompQue {
 impl CompQue {
     fn to_u16(&self) -> u16 {
         match self {
-            CompQue::AssertAfterOne => 0x0000,
-            CompQue::AssertAfterTwo => 0x0001,
-            CompQue::AssertAfterFour => 0x0002,
-            CompQue::Disabled => 0x0004,
+            CompQue::AssertAfterOne => 0b00,
+            CompQue::AssertAfterTwo => 0b01,
+            CompQue::AssertAfterFour => 0b10,
+            CompQue::Disabled => 0b11,
         }
     }
 }
@@ -454,6 +465,16 @@ impl TryFrom<u16> for CompQue {
     }
 }
 
+macro_rules! set_w_value {
+    ($self:ident, $value:ident; $mask:expr; $offset:expr) => {{
+        const MASK: u16 = $mask;
+        const OFFSET: u8 = $offset;
+        $self.w.bits &= !(MASK << OFFSET);
+        $self.w.bits |= ($value.to_u16() & MASK) << OFFSET;
+        $self.w
+    }};
+}
+
 pub struct _OS<'a> {
     w: &'a mut W,
 }
@@ -468,11 +489,13 @@ impl<'a> _OS<'a> {
     }
 
     pub fn bit(self, value: bool) -> &'a mut W {
-        const MASK: bool = true;
-        const OFFSET: u8 = 15;
-        self.w.bits &= !((MASK as u16) << OFFSET);
-        self.w.bits |= ((value & MASK) as u16) << OFFSET;
-        self.w
+        let value = Bit::from(value);
+        set_w_value!(self, value; 0b1; 15)
+        //const MASK: bool = true;
+        //const OFFSET: u8 = 15;
+        //self.w.bits &= !((MASK as u16) << OFFSET);
+        //self.w.bits |= ((value & MASK) as u16) << OFFSET;
+        //self.w
     }
 }
 
@@ -482,9 +505,7 @@ pub struct _Channel<'a> {
 
 impl<'a> _Channel<'a> {
     pub fn set_multiplexer_config(self, config: Channel) -> &'a mut W {
-        const MASK: u16 = 0x7000;
-        self.w.bits = (!MASK & self.w.bits) + config.to_u16();
-        self.w
+        set_w_value!(self, config; 0b111; 12)
     }
 }
 
@@ -494,9 +515,10 @@ pub struct _Pga<'a> {
 
 impl<'a> _Pga<'a> {
     pub fn set_gain(self, gain: Gain) -> &'a mut W {
-        const MASK: u16 = 0x0E00;
-        self.w.bits = (!MASK & self.w.bits) + gain.to_u16();
-        self.w
+        set_w_value!(self, gain; 0b111; 9)
+        //const MASK: u16 = 0x0E00;
+        //self.w.bits = (!MASK & self.w.bits) + gain.to_u16();
+        //self.w
     }
 }
 
@@ -506,9 +528,10 @@ pub struct _Mode<'a> {
 
 impl<'a> _Mode<'a> {
     pub fn set_mode(self, mode: ConversionMode) -> &'a mut W {
-        const MASK: u16 = 0x0100;
-        self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
-        self.w
+        set_w_value!(self, mode; 0b1; 8)
+        //const MASK: u16 = 0x0100;
+        //self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
+        //self.w
     }
 }
 
@@ -518,9 +541,10 @@ pub struct _Dr<'a> {
 
 impl<'a> _Dr<'a> {
     pub fn set_data_rate(self, data_rate: DataRate) -> &'a mut W {
-        const MASK: u16 = 0x00E0;
-        self.w.bits = (!MASK & self.w.bits) + data_rate.to_u16();
-        self.w
+        set_w_value!(self, data_rate; 0b111; 5)
+        //const MASK: u16 = 0x00E0;
+        //self.w.bits = (!MASK & self.w.bits) + data_rate.to_u16();
+        //self.w
     }
 }
 
@@ -530,9 +554,10 @@ pub struct _CompMode<'a> {
 
 impl<'a> _CompMode<'a> {
     pub fn set_mode(self, comparator_mode: ComparatorMode) -> &'a mut W {
-        const MASK: u16 = 0x0010;
-        self.w.bits = (!MASK & self.w.bits) + comparator_mode.to_u16();
-        self.w
+        set_w_value!(self, comparator_mode; 0b1; 4)
+        //const MASK: u16 = 0x0010;
+        //self.w.bits = (!MASK & self.w.bits) + comparator_mode.to_u16();
+        //self.w
     }
 }
 
@@ -542,9 +567,10 @@ pub struct _CompPol<'a> {
 
 impl<'a> _CompPol<'a> {
     pub fn set_polarity(self, polarity: CompPol) -> &'a mut W {
-        const MASK: u16 = 0x0008;
-        self.w.bits = (!MASK & self.w.bits) + polarity.to_u16();
-        self.w
+        set_w_value!(self, polarity; 0b1; 3)
+        //const MASK: u16 = 0x0008;
+        //self.w.bits = (!MASK & self.w.bits) + polarity.to_u16();
+        //self.w
     }
 }
 
@@ -554,9 +580,10 @@ pub struct _CompLat<'a> {
 
 impl<'a> _CompLat<'a> {
     pub fn set_latching_mode(self, latching_mode: CompLat) -> &'a mut W {
-        const MASK: u16 = 0x0008;
-        self.w.bits = (!MASK & self.w.bits) + latching_mode.to_u16();
-        self.w
+        set_w_value!(self, latching_mode; 0b1; 2)
+        //const MASK: u16 = 0x0008;
+        //self.w.bits = (!MASK & self.w.bits) + latching_mode.to_u16();
+        //self.w
     }
 }
 
@@ -566,9 +593,10 @@ pub struct _CompQue<'a> {
 
 impl<'a> _CompQue<'a> {
     pub fn set_comparator_queue(self, mode: CompQue) -> &'a mut W {
-        const MASK: u16 = 0x0003;
-        self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
-        self.w
+        set_w_value!(self, mode; 0b11; 0)
+        //const MASK: u16 = 0x0003;
+        //self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
+        //self.w
     }
 }
 

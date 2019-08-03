@@ -1,6 +1,7 @@
 use core::convert::From;
 
 pub enum ADS1115Error<E> {
+    AlertRdyPinUnconfigured,
     ThresholdError,
     I2CError(E),
 }
