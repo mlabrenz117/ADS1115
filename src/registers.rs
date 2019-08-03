@@ -1,6 +1,13 @@
 use core::convert::TryFrom;
 
-pub(crate) trait ConfigRegister<E> {
+#[repr(u8)]
+pub enum Register {
+    Conversion = 0x0,
+    Config = 0x1,
+    LoThresh = 0x2,
+    HiThresh = 0x3,
+}
+pub trait Registers<E> {
     fn modify_config<F>(&mut self, f: F) -> Result<(), E>
     where
         for<'w> F: FnOnce(&R, &'w mut W) -> &'w mut W;
@@ -14,13 +21,23 @@ pub(crate) trait ConfigRegister<E> {
     fn reset_config(&mut self) -> Result<(), E> {
         self.write_config(|w| w)
     }
+
+    fn write_lo_thresh(&mut self, value: i16) -> Result<(), E>;
+
+    fn read_lo_thresh(&mut self) -> Result<i16, E>;
+
+    fn write_hi_thresh(&mut self, value: i16) -> Result<(), E>;
+
+    fn read_hi_thresh(&mut self) -> Result<i16, E>;
+
+    fn read_conversion_register(&mut self) -> Result<i16, E>;
 }
 
-pub(crate) struct R {
+pub struct R {
     bits: u16,
 }
 
-pub(crate) struct W {
+pub struct W {
     bits: u16,
 }
 
@@ -398,6 +415,13 @@ impl TryFrom<u16> for CompLat {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum CompAssertions {
+    AssertAfterOne,
+    AssertAfterTwo,
+    AssertAfterFour,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CompQue {
     Disabled,
     AssertAfterOne,
@@ -430,20 +454,20 @@ impl TryFrom<u16> for CompQue {
     }
 }
 
-pub(crate) struct _OS<'a> {
+pub struct _OS<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _OS<'a> {
-    pub(crate) fn set_bit(self) -> &'a mut W {
+    pub fn set_bit(self) -> &'a mut W {
         self.bit(true)
     }
 
-    pub(crate) fn clear_bit(self) -> &'a mut W {
+    pub fn clear_bit(self) -> &'a mut W {
         self.bit(false)
     }
 
-    pub(crate) fn bit(self, value: bool) -> &'a mut W {
+    pub fn bit(self, value: bool) -> &'a mut W {
         const MASK: bool = true;
         const OFFSET: u8 = 15;
         self.w.bits &= !((MASK as u16) << OFFSET);
@@ -452,96 +476,96 @@ impl<'a> _OS<'a> {
     }
 }
 
-pub(crate) struct _Channel<'a> {
+pub struct _Channel<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _Channel<'a> {
-    pub(crate) fn set_multiplexer_config(self, config: Channel) -> &'a mut W {
+    pub fn set_multiplexer_config(self, config: Channel) -> &'a mut W {
         const MASK: u16 = 0x7000;
         self.w.bits = (!MASK & self.w.bits) + config.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _Pga<'a> {
+pub struct _Pga<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _Pga<'a> {
-    pub(crate) fn set_gain(self, gain: Gain) -> &'a mut W {
+    pub fn set_gain(self, gain: Gain) -> &'a mut W {
         const MASK: u16 = 0x0E00;
         self.w.bits = (!MASK & self.w.bits) + gain.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _Mode<'a> {
+pub struct _Mode<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _Mode<'a> {
-    pub(crate) fn set_mode(self, mode: ConversionMode) -> &'a mut W {
+    pub fn set_mode(self, mode: ConversionMode) -> &'a mut W {
         const MASK: u16 = 0x0100;
         self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _Dr<'a> {
+pub struct _Dr<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _Dr<'a> {
-    pub(crate) fn set_data_rate(self, data_rate: DataRate) -> &'a mut W {
+    pub fn set_data_rate(self, data_rate: DataRate) -> &'a mut W {
         const MASK: u16 = 0x00E0;
         self.w.bits = (!MASK & self.w.bits) + data_rate.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _CompMode<'a> {
+pub struct _CompMode<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _CompMode<'a> {
-    pub(crate) fn set_mode(self, comparator_mode: ComparatorMode) -> &'a mut W {
+    pub fn set_mode(self, comparator_mode: ComparatorMode) -> &'a mut W {
         const MASK: u16 = 0x0010;
         self.w.bits = (!MASK & self.w.bits) + comparator_mode.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _CompPol<'a> {
+pub struct _CompPol<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _CompPol<'a> {
-    pub(crate) fn set_polarity(self, polarity: CompPol) -> &'a mut W {
+    pub fn set_polarity(self, polarity: CompPol) -> &'a mut W {
         const MASK: u16 = 0x0008;
         self.w.bits = (!MASK & self.w.bits) + polarity.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _CompLat<'a> {
+pub struct _CompLat<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _CompLat<'a> {
-    pub(crate) fn set_latching_mode(self, latching_mode: CompLat) -> &'a mut W {
+    pub fn set_latching_mode(self, latching_mode: CompLat) -> &'a mut W {
         const MASK: u16 = 0x0008;
         self.w.bits = (!MASK & self.w.bits) + latching_mode.to_u16();
         self.w
     }
 }
 
-pub(crate) struct _CompQue<'a> {
+pub struct _CompQue<'a> {
     w: &'a mut W,
 }
 
 impl<'a> _CompQue<'a> {
-    pub fn set_comparater_queue(self, mode: CompQue) -> &'a mut W {
+    pub fn set_comparator_queue(self, mode: CompQue) -> &'a mut W {
         const MASK: u16 = 0x0003;
         self.w.bits = (!MASK & self.w.bits) + mode.to_u16();
         self.w

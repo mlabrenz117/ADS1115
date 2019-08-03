@@ -6,62 +6,90 @@ use embedded_hal::{
     digital::v2::InputPin,
 };
 
-mod config;
+#[cfg(not(feature = "direct-access"))]
+mod registers;
 
-pub use config::{
-    Bit, Channel, CompLat, CompPol, CompQue, ComparatorMode, ConversionMode, DataRate, Gain,
+#[cfg(feature = "direct-access")]
+pub mod registers;
+
+pub mod err;
+
+pub use registers::{
+    Bit, Channel, CompAssertions, CompLat, CompPol, ComparatorMode, ConversionMode, DataRate, Gain,
 };
 
-use config::{ConfigRegister, R, W};
+use registers::{CompQue, Register, Registers, R, W};
 
-pub struct ADS1115<MODE, I2C, P> {
+use err::ADS1115Error;
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug)]
+pub enum AddressPin {
+    Ground = 0b1001000,
+    VDD = 0b1001001,
+    SDA = 0b1001010,
+    SCL = 0b1001011,
+}
+
+pub struct ADS1115<Mode, PinMode, I2C, P> {
     i2c: I2C,
-    alrt_rdy: P,
+    alrt_rdy: Option<P>,
     addr_pin: AddressPin,
-    _mode: PhantomData<MODE>,
+    _mode: PhantomData<Mode>,
+    _p_mode: PhantomData<PinMode>,
 }
 
 pub type Address = u8;
+
 pub struct SingleShot;
 pub struct Continuous;
+pub struct PinDisabled;
+pub struct CompAlrtPin;
+pub struct ConversReadyPin;
+
+macro_rules! change_state {
+    ($id:ident) => {
+        ADS1115 {
+            i2c: $id.i2c,
+            alrt_rdy: $id.alrt_rdy,
+            addr_pin: $id.addr_pin,
+            _mode: PhantomData,
+            _p_mode: PhantomData,
+        }
+    };
+}
 
 /// P should be Input < PullUp >
-impl<MODE, I2C, P, E> ADS1115<MODE, I2C, P>
+impl<Mode, PinMode, I2C, P, E> ADS1115<Mode, PinMode, I2C, P>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
+    P: InputPin,
 {
-    pub fn new(i2c: I2C, alrt_rdy: P, addr_pin: AddressPin) -> ADS1115<SingleShot, I2C, P> {
+    pub fn new(i2c: I2C, addr_pin: AddressPin) -> ADS1115<SingleShot, PinDisabled, I2C, P> {
         ADS1115 {
             i2c: i2c,
-            alrt_rdy,
+            alrt_rdy: None,
             addr_pin,
             _mode: PhantomData,
+            _p_mode: PhantomData,
         }
     }
 
     /// Reset all ADS1115 devices on given i2c bus, issues command 0x06.
-    pub unsafe fn reset_general_call(mut self) -> Result<ADS1115<SingleShot, I2C, P>, E> {
+    pub unsafe fn reset_general_call(
+        mut self,
+    ) -> Result<ADS1115<SingleShot, PinDisabled, I2C, P>, E> {
         self.i2c.write(self.addr_pin as Address, &[0x00, 0x06])?;
-        Ok(ADS1115 {
-            i2c: self.i2c,
-            alrt_rdy: self.alrt_rdy,
-            addr_pin: self.addr_pin,
-            _mode: PhantomData,
-        })
+        Ok(change_state!(self))
     }
 
-    /// Reset ADS1115 device at the addr_piness assosiated with this driver instance.
-    pub fn reset(mut self) -> Result<ADS1115<SingleShot, I2C, P>, E> {
+    /// Reset ADS1115 device at the address assosiated with this driver instance.
+    pub fn reset(mut self) -> Result<ADS1115<SingleShot, PinDisabled, I2C, P>, E> {
         self.reset_config()?;
-        Ok(ADS1115 {
-            i2c: self.i2c,
-            alrt_rdy: self.alrt_rdy,
-            addr_pin: self.addr_pin,
-            _mode: PhantomData,
-        })
+        Ok(change_state!(self))
     }
 
-    pub fn free(mut self) -> Result<(I2C, P), E> {
+    pub fn free(mut self) -> Result<(I2C, Option<P>), E> {
         self.reset_config()?;
         Ok((self.i2c, self.alrt_rdy))
     }
@@ -71,34 +99,45 @@ where
     }
 
     pub fn last_conversion_result(&mut self) -> Result<i16, E> {
-        let mut buffer = [0u8; 2];
-        self.i2c.write_read(
-            self.addr_pin as Address,
-            &[Register::Conversion as u8],
-            &mut buffer,
-        )?;
-        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+        self.read_conversion_register()
     }
-}
 
-impl<MODE, I2C, P, E> ADS1115<MODE, I2C, P>
-where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
-    P: InputPin,
-{
+    /// Sets up pin to act as alert_rdy pin.
+    ///
+    /// Note, per the manufature's datasheet, the alert/rdy
+    /// pin MUST be pulled high/low with a pull up/down resistor (1 kOhm - 10 kOhm)
+    pub unsafe fn set_alert_rdy_pin(&mut self, pin: P) {
+        self.alrt_rdy = Some(pin);
+    }
+
     /// Configures ALERT/RDY pin as a conversion ready pin.
     /// It does this by setting the MSB of the high threshold register to '1' and the MSB
     /// of the low threshold register to '0'. COMP_POL and COMP_QUE bits will be set to '0'.
-    ///
-    /// Note: ALERT/RDY pin requires a pull up resistor.
-    pub fn set_conversion_ready_pin_mode() -> Result<(), E> {
-        unimplemented!()
+    pub fn enable_conversion_ready_pin(
+        mut self,
+    ) -> Result<ADS1115<Mode, ConversReadyPin, I2C, P>, E> {
+        self.write_hi_thresh(-1)?;
+        self.write_lo_thresh(1)?;
+        self.modify_config(|_, w| {
+            w.comp_pol()
+                .set_polarity(CompPol::ActiveLow)
+                .comp_que()
+                .set_comparator_queue(CompQue::Disabled)
+        })?;
+        Ok(change_state!(self))
+    }
+
+    /// Requires ALERT/RDY pin to be set up with the set_alert_rdy_pin() function.
+    pub fn enable_comparator(mut self) -> Result<ADS1115<Mode, CompAlrtPin, I2C, P>, E> {
+        self.modify_config(|_, w| w.comp_que().set_comparator_queue(CompQue::AssertAfterTwo))?;
+        Ok(change_state!(self))
     }
 }
 
-impl<I2C, P, E> ADS1115<SingleShot, I2C, P>
+impl<PinMode, I2C, P, E> ADS1115<SingleShot, PinMode, I2C, P>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
+    P: InputPin,
 {
     pub fn read(&mut self, channel: Channel) -> Result<i16, E> {
         self.modify_config(|_, w| w.mux().set_multiplexer_config(channel).os().set_bit())?;
@@ -106,41 +145,65 @@ where
         self.last_conversion_result()
     }
 
-    pub fn into_continuous_mode(mut self) -> Result<ADS1115<Continuous, I2C, P>, E> {
+    pub fn into_continuous_mode(mut self) -> Result<ADS1115<Continuous, PinMode, I2C, P>, E> {
         while self.read_config()?.os() == Bit::Set {}
         self.modify_config(|_, w| w.mode().set_mode(ConversionMode::Continuous))?;
-        Ok(ADS1115 {
-            i2c: self.i2c,
-            alrt_rdy: self.alrt_rdy,
-            addr_pin: self.addr_pin,
-            _mode: PhantomData,
-        })
+        Ok(change_state!(self))
     }
 }
 
-impl<I2C, P, E> ADS1115<Continuous, I2C, P>
+impl<PinMode, I2C, P, E> ADS1115<Continuous, PinMode, I2C, P>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
+    P: InputPin,
 {
     pub fn begin_conversion(&mut self, channel: Channel) -> Result<(), E> {
+        unimplemented!()
+    }
+
+    pub fn into_single_shot_mode(mut self) -> Result<ADS1115<SingleShot, PinMode, I2C, P>, E> {
+        while self.read_config()?.os() == Bit::Set {}
+        self.modify_config(|_, w| w.mode().set_mode(ConversionMode::SingleShot))?;
+        Ok(change_state!(self))
+    }
+}
+
+impl<Mode, I2C, P, E> ADS1115<Mode, CompAlrtPin, I2C, P>
+where
+    I2C: WriteRead<Error = E> + Write<Error = E>,
+    P: InputPin,
+{
+    pub fn set_lo_thresh(&mut self, value: i16) -> Result<(), ADS1115Error<E>> {
+        let curr_hi = self.read_hi_thresh()?;
+        if value >= curr_hi {
+            return Err(ADS1115Error::ThresholdError);
+        }
+        self.write_lo_thresh(value)?;
         Ok(())
     }
 
-    pub fn into_single_shot_mode(mut self) -> Result<ADS1115<SingleShot, I2C, P>, E> {
-        while self.read_config()?.os() == Bit::Set {}
-        self.modify_config(|_, w| w.mode().set_mode(ConversionMode::SingleShot))?;
-        Ok(ADS1115 {
-            i2c: self.i2c,
-            alrt_rdy: self.alrt_rdy,
-            addr_pin: self.addr_pin,
-            _mode: PhantomData,
-        })
+    pub fn get_lo_thresh(&mut self) -> Result<i16, ADS1115Error<E>> {
+        Ok(self.read_lo_thresh()?)
+    }
+
+    pub fn set_hi_thresh(&mut self, value: i16) -> Result<(), ADS1115Error<E>> {
+        let curr_lo = self.read_lo_thresh()?;
+        if value <= curr_lo {
+            return Err(ADS1115Error::ThresholdError);
+        }
+        self.write_hi_thresh(value)?;
+        Ok(())
+    }
+
+    pub fn get_hi_thresh(&mut self) -> Result<i16, ADS1115Error<E>> {
+        Ok(self.read_hi_thresh()?)
     }
 }
 
-impl<MODE, I2C, P, E> ConfigRegister<E> for ADS1115<MODE, I2C, P>
+impl<Mode, PinMode, I2C, P, E> Registers<E> for ADS1115<Mode, PinMode, I2C, P>
 where
     I2C: WriteRead<Error = E> + Write<Error = E>,
+    P: InputPin,
 {
     fn modify_config<F>(&mut self, f: F) -> Result<(), E>
     where
@@ -178,21 +241,54 @@ where
         )?;
         Ok(())
     }
-}
 
-#[repr(u8)]
-#[derive(Clone, Copy, Debug)]
-pub enum AddressPin {
-    Ground = 0b1001000,
-    VDD = 0b1001001,
-    SDA = 0b1001010,
-    SCL = 0b1001011,
-}
+    fn read_conversion_register(&mut self) -> Result<i16, E> {
+        let mut buffer = [0u8; 2];
+        self.i2c.write_read(
+            self.addr_pin as Address,
+            &[Register::Conversion as u8],
+            &mut buffer,
+        )?;
+        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+    }
 
-#[repr(u8)]
-pub(crate) enum Register {
-    Conversion = 0x0,
-    Config = 0x1,
-    LoThresh = 0x2,
-    HiThresh = 0x3,
+    fn write_lo_thresh(&mut self, value: i16) -> Result<(), E> {
+        let msb = ((value as u16 & 0xff00) >> 8) as u8;
+        let lsb = (value & 0x00ff) as u8;
+        self.i2c.write(
+            self.addr_pin as Address,
+            &[Register::LoThresh as u8, msb, lsb],
+        )?;
+        Ok(())
+    }
+
+    fn write_hi_thresh(&mut self, value: i16) -> Result<(), E> {
+        let msb = ((value as u16 & 0xff00) >> 8) as u8;
+        let lsb = (value & 0x00ff) as u8;
+        self.i2c.write(
+            self.addr_pin as Address,
+            &[Register::HiThresh as u8, msb, lsb],
+        )?;
+        Ok(())
+    }
+
+    fn read_lo_thresh(&mut self) -> Result<i16, E> {
+        let mut buffer = [0u8; 2];
+        self.i2c.write_read(
+            self.addr_pin as Address,
+            &[Register::LoThresh as u8],
+            &mut buffer,
+        )?;
+        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+    }
+
+    fn read_hi_thresh(&mut self) -> Result<i16, E> {
+        let mut buffer = [0u8; 2];
+        self.i2c.write_read(
+            self.addr_pin as Address,
+            &[Register::HiThresh as u8],
+            &mut buffer,
+        )?;
+        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+    }
 }
