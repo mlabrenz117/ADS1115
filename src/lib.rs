@@ -1,4 +1,5 @@
 #![no_std]
+use core::convert::From;
 use core::marker::PhantomData;
 
 use embedded_hal::{
@@ -12,16 +13,23 @@ mod registers;
 #[cfg(feature = "direct-access")]
 pub mod registers;
 
-mod err;
-
 pub use registers::{
     Bit, Channel, CompAssertions, CompLat, CompPol, ComparatorMode, ConversionMode, DataRate, Gain,
 };
 
 use registers::{CompQue, Register, Registers, R, W};
 
-pub use err::ADS1115Error;
+pub enum ADS1115Error<E> {
+    AlertRdyPinUnconfigured,
+    ThresholdError,
+    I2CError(E),
+}
 
+impl<E> From<E> for ADS1115Error<E> {
+    fn from(e: E) -> Self {
+        ADS1115Error::I2CError(e)
+    }
+}
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
 pub enum AddressPin {
