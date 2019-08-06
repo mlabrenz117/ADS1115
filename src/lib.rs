@@ -1,4 +1,5 @@
 #![no_std]
+use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use embedded_hal::{
@@ -108,7 +109,7 @@ where
             &[Register::Conversion as u8],
             &mut buffer,
         )?;
-        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+        Ok(((buffer[0] as u16) << 8) as i16 + buffer[1] as i16)
     }
 
     fn write_lo_thresh(&mut self, value: i16) -> Result<(), E> {
@@ -138,7 +139,7 @@ where
             &[Register::LoThresh as u8],
             &mut buffer,
         )?;
-        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+        Ok(((buffer[0] as u16) << 8) as i16 + buffer[1] as i16)
     }
 
     fn read_hi_thresh(&mut self) -> Result<i16, E> {
@@ -148,7 +149,20 @@ where
             &[Register::HiThresh as u8],
             &mut buffer,
         )?;
-        Ok((buffer[0] as i16) << 8 + buffer[1] as i16)
+        Ok(((buffer[0] as u16) << 8) as i16 + buffer[1] as i16)
+    }
+}
+
+pub fn new<I2C: WriteRead<Error = E> + Write<Error = E>, E, P: InputPin>(
+    i2c: I2C,
+    addr_pin: AddressPin,
+) -> ADS1115<SingleShot, PinDisabled, I2C, P> {
+    ADS1115 {
+        i2c: i2c,
+        alrt_rdy: None,
+        addr_pin,
+        _mode: PhantomData,
+        _p_mode: PhantomData,
     }
 }
 
@@ -158,21 +172,11 @@ where
     I2C: WriteRead<Error = E> + Write<Error = E>,
     P: InputPin,
 {
-    pub fn new(i2c: I2C, addr_pin: AddressPin) -> ADS1115<SingleShot, PinDisabled, I2C, P> {
-        ADS1115 {
-            i2c: i2c,
-            alrt_rdy: None,
-            addr_pin,
-            _mode: PhantomData,
-            _p_mode: PhantomData,
-        }
-    }
-
     /// Reset all ADS1115 devices on given i2c bus, issues command 0x06.
     pub unsafe fn reset_general_call(
         mut self,
     ) -> Result<ADS1115<SingleShot, PinDisabled, I2C, P>, ADS1115Error<E>> {
-        self.i2c.write(self.addr_pin as Address, &[0x00, 0x06])?;
+        self.i2c.write(0x00, &[0x06])?;
         Ok(change_state!(self))
     }
 
