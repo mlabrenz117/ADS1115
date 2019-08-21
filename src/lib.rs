@@ -1,6 +1,5 @@
 #![no_std]
 use core::convert::From;
-use core::fmt::Debug;
 use core::marker::PhantomData;
 
 use embedded_hal::{
@@ -20,6 +19,7 @@ pub use registers::{
 
 use registers::{CompQue, Register, Registers, R, W};
 
+#[derive(Debug)]
 pub enum ADS1115Error<E> {
     AlertRdyPinUnconfigured,
     ThresholdError,
@@ -311,7 +311,7 @@ where
     P: InputPin,
 {
     pub fn begin_conversion(&mut self, channel: Channel) -> Result<(), ADS1115Error<E>> {
-        while self.read_config()?.os() == Bit::Set {}
+        while self.read_config()?.os() == Bit::Clear {}
         self.modify_config(|_, w| {
             w.mux()
                 .set_multiplexer_config(channel)
